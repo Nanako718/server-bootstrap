@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# 一键安装脚本：Oh My Zsh + Docker + Docker Compose
+# 一键安装脚本：Oh My Zsh + Docker + Docker Compose + Starship + 0xProto 字体
 # 支持 macOS 和 Linux 系统
 
 set -e  # 遇到错误立即退出（某些非关键操作会使用 || true 来避免退出）
@@ -52,6 +52,107 @@ detect_system() {
     fi
 }
 
+# 检查并安装 curl 和 wget
+install_curl_wget() {
+    local NEED_CURL=false
+    local NEED_WGET=false
+    
+    if ! command -v curl &> /dev/null; then
+        NEED_CURL=true
+    fi
+    
+    if ! command -v wget &> /dev/null; then
+        NEED_WGET=true
+    fi
+    
+    # 如果两者都已安装，直接返回
+    if [ "$NEED_CURL" = false ] && [ "$NEED_WGET" = false ]; then
+        return 0
+    fi
+    
+    # 至少需要其中一个，优先安装 curl
+    if [ "$NEED_CURL" = true ]; then
+        print_info "正在安装 curl..."
+        
+        if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+            if command -v brew &> /dev/null; then
+                brew install curl
+            else
+                print_warn "macOS 系统通常已预装 curl，如果未找到请先安装 Homebrew"
+            fi
+        else
+            # Linux 系统
+            if command -v apt-get &> /dev/null; then
+                # Debian/Ubuntu
+                sudo apt-get update
+                sudo apt-get install -y curl
+            elif command -v yum &> /dev/null; then
+                # CentOS/RHEL 7
+                sudo yum install -y curl
+            elif command -v dnf &> /dev/null; then
+                # Fedora/CentOS 8+/RHEL 8+
+                sudo dnf install -y curl
+            elif command -v pacman &> /dev/null; then
+                # Arch Linux
+                sudo pacman -S --noconfirm curl
+            elif command -v zypper &> /dev/null; then
+                # openSUSE
+                sudo zypper install -y curl
+            elif command -v apk &> /dev/null; then
+                # Alpine Linux
+                sudo apk add --no-cache curl
+            else
+                print_error "未找到支持的包管理器，无法安装 curl"
+                return 1
+            fi
+        fi
+    fi
+    
+    # 如果 curl 安装失败或不存在，尝试安装 wget
+    if [ "$NEED_WGET" = true ] && ! command -v curl &> /dev/null; then
+        print_info "正在安装 wget..."
+        
+        if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+            if command -v brew &> /dev/null; then
+                brew install wget
+            else
+                print_warn "macOS 系统需要 Homebrew 来安装 wget"
+            fi
+        else
+            # Linux 系统
+            if command -v apt-get &> /dev/null; then
+                # Debian/Ubuntu
+                sudo apt-get update
+                sudo apt-get install -y wget
+            elif command -v yum &> /dev/null; then
+                # CentOS/RHEL 7
+                sudo yum install -y wget
+            elif command -v dnf &> /dev/null; then
+                # Fedora/CentOS 8+/RHEL 8+
+                sudo dnf install -y wget
+            elif command -v pacman &> /dev/null; then
+                # Arch Linux
+                sudo pacman -S --noconfirm wget
+            elif command -v zypper &> /dev/null; then
+                # openSUSE
+                sudo zypper install -y wget
+            elif command -v apk &> /dev/null; then
+                # Alpine Linux
+                sudo apk add --no-cache wget
+            else
+                print_error "未找到支持的包管理器，无法安装 wget"
+                return 1
+            fi
+        fi
+    fi
+    
+    # 验证安装
+    if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+        print_error "curl 和 wget 都未安装成功，脚本无法继续"
+        return 1
+    fi
+}
+
 # 检查并安装 Homebrew (仅 macOS)
 install_homebrew() {
     if [[ "$SYSTEM_TYPE" != "macos" ]]; then
@@ -63,6 +164,10 @@ install_homebrew() {
         brew update
     else
         print_info "正在安装 Homebrew..."
+        # 确保 curl 已安装（Homebrew 安装需要）
+        if ! command -v curl &> /dev/null; then
+            install_curl_wget
+        fi
         /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
         
         # 配置 Homebrew 环境变量（适用于 Apple Silicon Mac）
@@ -319,6 +424,293 @@ configure_docker_autostart() {
     fi
 }
 
+# 下载并安装 0xProto 字体
+install_0xproto_font() {
+    print_info "正在下载并安装 0xProto 字体..."
+    
+    local FONT_ZIP="0xProto.zip"
+    local FONT_DIR=""
+    local SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # 确定字体安装目录
+    if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+        FONT_DIR="$HOME/Library/Fonts"
+    else
+        # Linux 系统：优先使用 ~/.local/share/fonts，如果没有则使用 ~/.fonts
+        FONT_DIR="$HOME/.local/share/fonts"
+        if [ ! -d "$FONT_DIR" ]; then
+            FONT_DIR="$HOME/.fonts"
+        fi
+    fi
+    
+    # 创建字体目录
+    mkdir -p "$FONT_DIR"
+    
+    # 检查本地是否有字体文件
+    local LOCAL_FONT_ZIP="$SCRIPT_DIR/$FONT_ZIP"
+    local TEMP_DIR=$(mktemp -d)
+    local FONT_URL="https://github.com/Nanako718/server-bootstrap/raw/refs/heads/main/0xProto.zip"
+    
+    if [ -f "$LOCAL_FONT_ZIP" ]; then
+        print_info "找到本地字体文件: $LOCAL_FONT_ZIP"
+        cp "$LOCAL_FONT_ZIP" "$TEMP_DIR/$FONT_ZIP"
+    else
+        print_info "本地未找到字体文件，正在从 GitHub 下载..."
+        if command -v curl &> /dev/null; then
+            if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+                print_info "字体文件下载成功"
+            else
+                print_error "字体文件下载失败，请检查网络连接"
+                print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+        elif command -v wget &> /dev/null; then
+            if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+                print_info "字体文件下载成功"
+            else
+                print_error "字体文件下载失败，请检查网络连接"
+                print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+        else
+            print_warn "未找到 curl 或 wget 命令，正在尝试安装..."
+            install_curl_wget
+            # 重试下载
+            if command -v curl &> /dev/null; then
+                if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+                    print_info "字体文件下载成功"
+                else
+                    print_error "字体文件下载失败，请检查网络连接"
+                    print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
+                    rm -rf "$TEMP_DIR"
+                    return 1
+                fi
+            elif command -v wget &> /dev/null; then
+                if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+                    print_info "字体文件下载成功"
+                else
+                    print_error "字体文件下载失败，请检查网络连接"
+                    print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
+                    rm -rf "$TEMP_DIR"
+                    return 1
+                fi
+            else
+                print_error "curl 和 wget 都未安装成功，无法下载字体文件"
+                print_info "请手动下载字体文件: $FONT_URL"
+                rm -rf "$TEMP_DIR"
+                return 1
+            fi
+        fi
+    fi
+    
+    # 解压字体文件
+    if command -v unzip &> /dev/null; then
+        print_info "正在解压字体文件..."
+        cd "$TEMP_DIR"
+        unzip -q "$FONT_ZIP" -d "$TEMP_DIR" 2>/dev/null || {
+            print_error "字体文件解压失败，请检查文件是否完整"
+            rm -rf "$TEMP_DIR"
+            return 1
+        }
+        
+        # 查找并复制字体文件（.ttf 或 .otf）
+        local FONT_COUNT=0
+        find "$TEMP_DIR" -type f \( -name "*.ttf" -o -name "*.otf" \) 2>/dev/null | while read -r font_file; do
+            if [ -n "$font_file" ]; then
+                cp "$font_file" "$FONT_DIR/"
+                FONT_COUNT=$((FONT_COUNT + 1))
+                print_info "已安装字体: $(basename "$font_file")"
+            fi
+        done
+        
+        # 重新计算字体数量（因为 while 循环在子 shell 中）
+        FONT_COUNT=$(find "$FONT_DIR" -maxdepth 1 -type f \( -name "*0xProto*" -o -name "*0xproto*" \) 2>/dev/null | wc -l | tr -d ' ')
+        
+        if [ "$FONT_COUNT" -eq 0 ] || [ -z "$FONT_COUNT" ]; then
+            print_warn "未在压缩包中找到字体文件（.ttf 或 .otf），或字体安装失败"
+        else
+            print_info "0xProto 字体安装完成"
+        fi
+        
+        # 清理临时文件
+        rm -rf "$TEMP_DIR"
+        
+        # Linux 系统需要刷新字体缓存
+        if [[ "$SYSTEM_TYPE" == "linux" ]]; then
+            if command -v fc-cache &> /dev/null; then
+                print_info "正在刷新字体缓存..."
+                fc-cache -fv "$FONT_DIR" 2>/dev/null || true
+            fi
+        fi
+    else
+        print_error "未找到 unzip 命令，无法解压字体文件"
+        print_info "请安装 unzip: sudo apt-get install unzip (Debian/Ubuntu) 或 sudo yum install unzip (CentOS/RHEL)"
+        rm -rf "$TEMP_DIR"
+        return 1
+    fi
+}
+
+# 安装 Starship
+install_starship() {
+    if command -v starship &> /dev/null; then
+        print_info "Starship 已安装，版本: $(starship --version)"
+    else
+        print_info "正在安装 Starship..."
+        
+        # 确保 curl 已安装（安装脚本需要）
+        if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+            print_info "安装 Starship 需要 curl 或 wget，正在安装..."
+            install_curl_wget
+        fi
+        
+        if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+            # macOS 使用 Homebrew 安装（如果可用）
+            if command -v brew &> /dev/null; then
+                print_info "使用 Homebrew 安装 Starship..."
+                brew install starship
+            else
+                # 使用官方安装脚本
+                print_info "使用官方安装脚本安装 Starship..."
+                if command -v curl &> /dev/null; then
+                    sh -c "$(curl -fsSL https://starship.rs/install.sh)" -- --yes
+                elif command -v wget &> /dev/null; then
+                    # 使用 wget 下载安装脚本
+                    local INSTALL_SCRIPT=$(mktemp)
+                    wget -q -O "$INSTALL_SCRIPT" https://starship.rs/install.sh
+                    sh "$INSTALL_SCRIPT" -- --yes
+                    rm -f "$INSTALL_SCRIPT"
+                else
+                    print_error "无法安装 Starship：需要 curl 或 wget"
+                    return 1
+                fi
+            fi
+        else
+            # Linux 系统使用官方安装脚本
+            print_info "使用官方安装脚本安装 Starship..."
+            if command -v curl &> /dev/null; then
+                sh -c "$(curl -fsSL https://starship.rs/install.sh)" -- --yes
+            elif command -v wget &> /dev/null; then
+                # 使用 wget 下载安装脚本
+                local INSTALL_SCRIPT=$(mktemp)
+                wget -q -O "$INSTALL_SCRIPT" https://starship.rs/install.sh
+                sh "$INSTALL_SCRIPT" -- --yes
+                rm -f "$INSTALL_SCRIPT"
+            else
+                print_error "无法安装 Starship：需要 curl 或 wget"
+                return 1
+            fi
+        fi
+    fi
+}
+
+# 配置 Starship
+configure_starship() {
+    print_info "正在配置 Starship..."
+    
+    local STARSHIP_CONFIG_DIR="$HOME/.config"
+    local STARSHIP_CONFIG_FILE="$STARSHIP_CONFIG_DIR/starship.toml"
+    local SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local LOCAL_CONFIG="$SCRIPT_DIR/starship.toml"
+    
+    # 创建配置目录
+    mkdir -p "$STARSHIP_CONFIG_DIR"
+    
+    # 检查本地是否有配置文件
+    local CONFIG_URL="https://raw.githubusercontent.com/Nanako718/server-bootstrap/refs/heads/main/starship.toml"
+    
+    if [ -f "$LOCAL_CONFIG" ]; then
+        print_info "找到本地配置文件: $LOCAL_CONFIG"
+        if [ -f "$STARSHIP_CONFIG_FILE" ]; then
+            cp "$STARSHIP_CONFIG_FILE" "$STARSHIP_CONFIG_FILE.backup.$(date +%Y%m%d_%H%M%S)"
+            print_info "已备份现有 Starship 配置文件"
+        fi
+        cp "$LOCAL_CONFIG" "$STARSHIP_CONFIG_FILE"
+        print_info "Starship 配置文件已复制到: $STARSHIP_CONFIG_FILE"
+    else
+        print_info "本地未找到配置文件，正在从 GitHub 下载..."
+        # 如果已存在配置文件，先备份
+        if [ -f "$STARSHIP_CONFIG_FILE" ]; then
+            cp "$STARSHIP_CONFIG_FILE" "$STARSHIP_CONFIG_FILE.backup.$(date +%Y%m%d_%H%M%S)"
+            print_info "已备份现有 Starship 配置文件"
+        fi
+        
+        if command -v curl &> /dev/null; then
+            if curl -fsSL -o "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+                print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
+            else
+                print_warn "配置文件下载失败，将使用 Starship 默认配置"
+                print_info "您也可以稍后手动下载: $CONFIG_URL"
+            fi
+        elif command -v wget &> /dev/null; then
+            if wget -q -O "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+                print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
+            else
+                print_warn "配置文件下载失败，将使用 Starship 默认配置"
+                print_info "您也可以稍后手动下载: $CONFIG_URL"
+            fi
+        else
+            print_warn "未找到 curl 或 wget 命令，正在尝试安装..."
+            install_curl_wget
+            # 重试下载
+            if command -v curl &> /dev/null; then
+                if curl -fsSL -o "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+                    print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
+                else
+                    print_warn "配置文件下载失败，将使用 Starship 默认配置"
+                    print_info "您也可以稍后手动下载: $CONFIG_URL"
+                fi
+            elif command -v wget &> /dev/null; then
+                if wget -q -O "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+                    print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
+                else
+                    print_warn "配置文件下载失败，将使用 Starship 默认配置"
+                    print_info "您也可以稍后手动下载: $CONFIG_URL"
+                fi
+            else
+                print_warn "curl 和 wget 都未安装成功，无法下载配置文件"
+                print_info "将使用 Starship 默认配置，或您可以稍后手动下载: $CONFIG_URL"
+            fi
+        fi
+    fi
+    
+    # 在 .zshrc 中添加 Starship 初始化代码
+    local ZSHRC="$HOME/.zshrc"
+    
+    # 确保 .zshrc 文件存在
+    if [ ! -f "$ZSHRC" ]; then
+        touch "$ZSHRC"
+        print_info "创建 .zshrc 文件"
+    fi
+    
+    # 检查并添加 Starship 初始化代码
+    if ! grep -q "starship init zsh" "$ZSHRC"; then
+        print_info "正在在 .zshrc 中添加 Starship 初始化代码..."
+        echo "" >> "$ZSHRC"
+        echo "# Starship 提示符配置" >> "$ZSHRC"
+        echo 'eval "$(starship init zsh)"' >> "$ZSHRC"
+        print_info "Starship 初始化代码已添加到 .zshrc"
+    else
+        print_info "Starship 初始化代码已存在于 .zshrc 中"
+    fi
+    
+    # 验证 Starship 配置
+    if command -v starship &> /dev/null; then
+        if [ -f "$STARSHIP_CONFIG_FILE" ]; then
+            # 验证配置文件格式
+            if starship config --config-file "$STARSHIP_CONFIG_FILE" &> /dev/null; then
+                print_info "Starship 配置文件验证成功"
+            else
+                print_warn "Starship 配置文件格式可能有问题，但已安装"
+            fi
+        fi
+        print_info "Starship 配置完成，请运行 'source ~/.zshrc' 或重新打开终端以应用配置"
+    else
+        print_warn "Starship 未安装，配置将在 Starship 安装后生效"
+    fi
+}
+
 # 验证安装
 verify_installation() {
     print_info "正在验证安装..."
@@ -352,18 +744,61 @@ verify_installation() {
         print_error "✗ Docker Compose 未安装"
     fi
     
+    if command -v starship &> /dev/null; then
+        print_info "✓ Starship 版本: $(starship --version)"
+    else
+        print_error "✗ Starship 未安装"
+    fi
+    
+    if [ -f "$HOME/.config/starship.toml" ]; then
+        print_info "✓ Starship 配置文件已存在"
+        # 验证配置文件格式
+        if command -v starship &> /dev/null; then
+            if starship config --config-file "$HOME/.config/starship.toml" &> /dev/null; then
+                print_info "✓ Starship 配置文件格式正确"
+            else
+                print_warn "⚠ Starship 配置文件格式可能有问题"
+            fi
+        fi
+    else
+        print_warn "⚠ Starship 配置文件不存在（将使用默认配置）"
+    fi
+    
+    # 检查 .zshrc 中是否配置了 Starship
+    if grep -q "starship init zsh" "$HOME/.zshrc" 2>/dev/null; then
+        print_info "✓ Starship 已在 .zshrc 中配置"
+    else
+        print_warn "⚠ Starship 未在 .zshrc 中配置（可能需要手动添加）"
+    fi
+    
+    # 检查字体是否安装（简单检查）
+    if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+        if [ -d "$HOME/Library/Fonts" ] && find "$HOME/Library/Fonts" -name "*0xProto*" -o -name "*0xproto*" 2>/dev/null | grep -q .; then
+            print_info "✓ 0xProto 字体已安装"
+        else
+            print_warn "⚠ 0xProto 字体可能未正确安装"
+        fi
+    else
+        if find "$HOME/.local/share/fonts" "$HOME/.fonts" -name "*0xProto*" -o -name "*0xproto*" 2>/dev/null | grep -q .; then
+            print_info "✓ 0xProto 字体已安装"
+        else
+            print_warn "⚠ 0xProto 字体可能未正确安装"
+        fi
+    fi
+    
     echo ""
     print_info "=== 安装完成 ==="
-    print_info "请重新登录或运行 'source ~/.zshrc' 以应用 Oh My Zsh 配置"
+    print_info "请重新登录或运行 'source ~/.zshrc' 以应用所有配置"
     if [[ "$SYSTEM_TYPE" == "linux" ]] && [ "$EUID" -ne 0 ]; then
         print_warn "如果 Docker 命令需要 sudo，请重新登录以使 docker 组权限生效"
     fi
+    print_info "如果字体未正确显示，请重启终端或重新登录"
 }
 
 # 主函数
 main() {
     print_info "=========================================="
-    print_info "  一键安装脚本：Oh My Zsh + Docker + Docker Compose"
+    print_info "  一键安装脚本：Oh My Zsh + Docker + Docker Compose + Starship + 0xProto 字体"
     print_info "=========================================="
     echo ""
     
@@ -373,6 +808,10 @@ main() {
     # 检测系统类型
     detect_system
     
+    # 首先安装 curl/wget（其他安装步骤可能需要）
+    print_info "检查并安装必要的工具..."
+    install_curl_wget
+    
     # 安装步骤
     if [[ "$SYSTEM_TYPE" == "macos" ]]; then
         install_homebrew
@@ -381,6 +820,9 @@ main() {
     install_zsh
     install_oh_my_zsh
     install_zsh_plugins
+    install_0xproto_font
+    install_starship
+    configure_starship
     install_docker
     install_docker_compose
     configure_docker_autostart

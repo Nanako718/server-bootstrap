@@ -1,0 +1,25 @@
+# 备份文件
+*.backup.*
+*.bak
+*~
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE 文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 个人配置（如果需要）
+# .zshrc
+# .config/starship.toml
+
