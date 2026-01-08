@@ -424,6 +424,32 @@ configure_docker_autostart() {
     fi
 }
 
+# 设置系统时区
+configure_timezone() {
+    print_info "正在设置系统时区..."
+    
+    if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+        # macOS 系统使用系统设置
+        print_info "macOS 系统请手动在系统设置中配置时区"
+        print_info "或使用命令: sudo systemsetup -settimezone Asia/Shanghai"
+        # 尝试设置（需要管理员权限）
+        sudo systemsetup -settimezone Asia/Shanghai 2>/dev/null && print_info "时区已设置为 Asia/Shanghai" || print_warn "时区设置失败，请手动配置"
+    else
+        # Linux 系统使用 timedatectl
+        if command -v timedatectl &> /dev/null; then
+            if sudo timedatectl set-timezone Asia/Shanghai 2>/dev/null; then
+                print_info "时区已设置为 Asia/Shanghai"
+                print_info "当前时间: $(date '+%Y-%m-%d %H:%M:%S %Z')"
+            else
+                print_warn "时区设置失败，可能需要管理员权限"
+            fi
+        else
+            print_warn "未找到 timedatectl 命令，无法自动设置时区"
+            print_info "请手动设置时区或安装 systemd"
+        fi
+    fi
+}
+
 # 下载并安装 0xProto 字体
 install_0xproto_font() {
     print_info "正在下载并安装 0xProto 字体..."
@@ -717,82 +743,94 @@ verify_installation() {
     
     echo ""
     print_info "=== 安装验证 ==="
+    echo ""
     
+    local INSTALLED_COUNT=0
+    local TOTAL_COUNT=6
+    
+    # Zsh
     if command -v zsh &> /dev/null; then
-        print_info "✓ Zsh 版本: $(zsh --version)"
+        print_info "✓ Zsh"
+        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
     else
-        print_error "✗ Zsh 未安装"
+        print_error "✗ Zsh"
     fi
     
+    # Oh My Zsh
     if [ -d "$HOME/.oh-my-zsh" ]; then
-        print_info "✓ Oh My Zsh 已安装"
+        print_info "✓ Oh My Zsh"
+        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
     else
-        print_error "✗ Oh My Zsh 未安装"
+        print_error "✗ Oh My Zsh"
     fi
     
+    # Docker
     if command -v docker &> /dev/null; then
-        print_info "✓ Docker 版本: $(docker --version)"
+        print_info "✓ Docker"
+        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
     else
-        print_error "✗ Docker 未安装"
+        print_error "✗ Docker"
     fi
     
-    if command -v docker-compose &> /dev/null; then
-        print_info "✓ Docker Compose 版本: $(docker-compose --version)"
-    elif docker compose version &> /dev/null; then
-        print_info "✓ Docker Compose (插件版本) 版本: $(docker compose version)"
+    # Docker Compose
+    if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then
+        print_info "✓ Docker Compose"
+        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
     else
-        print_error "✗ Docker Compose 未安装"
+        print_error "✗ Docker Compose"
     fi
     
-    if command -v starship &> /dev/null; then
-        print_info "✓ Starship 版本: $(starship --version)"
+    # Starship
+    if command -v starship &> /dev/null && [ -f "$HOME/.config/starship.toml" ]; then
+        print_info "✓ Starship"
+        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
     else
-        print_error "✗ Starship 未安装"
+        print_warn "⚠ Starship（可能未完全配置）"
     fi
     
-    if [ -f "$HOME/.config/starship.toml" ]; then
-        print_info "✓ Starship 配置文件已存在"
-        # 验证配置文件格式
-        if command -v starship &> /dev/null; then
-            if starship config --config-file "$HOME/.config/starship.toml" &> /dev/null; then
-                print_info "✓ Starship 配置文件格式正确"
-            else
-                print_warn "⚠ Starship 配置文件格式可能有问题"
-            fi
-        fi
-    else
-        print_warn "⚠ Starship 配置文件不存在（将使用默认配置）"
-    fi
-    
-    # 检查 .zshrc 中是否配置了 Starship
-    if grep -q "starship init zsh" "$HOME/.zshrc" 2>/dev/null; then
-        print_info "✓ Starship 已在 .zshrc 中配置"
-    else
-        print_warn "⚠ Starship 未在 .zshrc 中配置（可能需要手动添加）"
-    fi
-    
-    # 检查字体是否安装（简单检查）
+    # 字体
+    local FONT_INSTALLED=false
     if [[ "$SYSTEM_TYPE" == "macos" ]]; then
         if [ -d "$HOME/Library/Fonts" ] && find "$HOME/Library/Fonts" -name "*0xProto*" -o -name "*0xproto*" 2>/dev/null | grep -q .; then
-            print_info "✓ 0xProto 字体已安装"
-        else
-            print_warn "⚠ 0xProto 字体可能未正确安装"
+            FONT_INSTALLED=true
         fi
     else
         if find "$HOME/.local/share/fonts" "$HOME/.fonts" -name "*0xProto*" -o -name "*0xproto*" 2>/dev/null | grep -q .; then
-            print_info "✓ 0xProto 字体已安装"
-        else
-            print_warn "⚠ 0xProto 字体可能未正确安装"
+            FONT_INSTALLED=true
         fi
     fi
     
-    echo ""
-    print_info "=== 安装完成 ==="
-    print_info "请重新登录或运行 'source ~/.zshrc' 以应用所有配置"
-    if [[ "$SYSTEM_TYPE" == "linux" ]] && [ "$EUID" -ne 0 ]; then
-        print_warn "如果 Docker 命令需要 sudo，请重新登录以使 docker 组权限生效"
+    if [ "$FONT_INSTALLED" = true ]; then
+        print_info "✓ 0xProto 字体"
+        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+    else
+        print_warn "⚠ 0xProto 字体（可能未正确安装）"
     fi
-    print_info "如果字体未正确显示，请重启终端或重新登录"
+    
+    echo ""
+    print_info "安装进度: $INSTALLED_COUNT/$TOTAL_COUNT 组件已就绪"
+    
+    echo ""
+    print_info "=========================================="
+    print_info "            🎉 安装完成！"
+    print_info "=========================================="
+    echo ""
+    print_info "📝 下一步操作："
+    echo ""
+    print_info "1. 重新加载配置："
+    print_info "   source ~/.zshrc"
+    echo ""
+    print_info "2. 如果这是首次安装 Zsh，请切换默认 Shell："
+    print_info "   chsh -s $(which zsh)"
+    echo ""
+    if [[ "$SYSTEM_TYPE" == "linux" ]] && [ "$EUID" -ne 0 ]; then
+        print_info "3. 如果 Docker 命令需要 sudo，请重新登录："
+        print_info "   重新登录后 docker 组权限将生效"
+        echo ""
+    fi
+    print_info "4. 如果字体未显示，请重启终端应用"
+    echo ""
+    print_info "✨ 享受您的新开发环境！"
 }
 
 # 主函数
@@ -826,6 +864,7 @@ main() {
     install_docker
     install_docker_compose
     configure_docker_autostart
+    configure_timezone
     
     # 验证安装
     verify_installation
