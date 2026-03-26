@@ -5,6 +5,11 @@
 
 set -e  # 遇到错误立即退出（某些非关键操作会使用 || true 来避免退出）
 
+# 全局选项
+INSTALL_DOCKER=true
+USE_GITHUB_PROXY=false
+GITHUB_PROXY_PREFIX=""
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -22,6 +27,60 @@ print_warn() {
 
 print_error() {
     echo -e "${RED}[ERROR]${NC} $1"
+}
+
+# 询问安装选项
+ask_install_options() {
+    local docker_choice=""
+    local proxy_choice=""
+    local custom_proxy=""
+
+    echo ""
+    print_info "请选择安装选项："
+    echo "1) 安装 Docker 与 Docker Compose（默认）"
+    echo "2) 跳过 Docker 与 Docker Compose"
+    read -r -p "请输入选项 [1/2，默认 1]: " docker_choice
+    if [[ "$docker_choice" == "2" ]]; then
+        INSTALL_DOCKER=false
+        print_info "已选择：跳过 Docker 与 Docker Compose"
+    else
+        INSTALL_DOCKER=true
+        print_info "已选择：安装 Docker 与 Docker Compose"
+    fi
+
+    echo ""
+    print_info "GitHub 下载是否使用代理："
+    echo "1) 不使用代理（默认）"
+    echo "2) 使用代理"
+    read -r -p "请输入选项 [1/2，默认 1]: " proxy_choice
+    if [[ "$proxy_choice" == "2" ]]; then
+        USE_GITHUB_PROXY=true
+        read -r -p "请输入代理前缀（默认 https://ghproxy.com/）: " custom_proxy
+        if [ -n "$custom_proxy" ]; then
+            GITHUB_PROXY_PREFIX="$custom_proxy"
+        else
+            GITHUB_PROXY_PREFIX="https://ghproxy.com/"
+        fi
+        case "$GITHUB_PROXY_PREFIX" in
+            */) ;;
+            *) GITHUB_PROXY_PREFIX="${GITHUB_PROXY_PREFIX}/" ;;
+        esac
+        print_info "已启用 GitHub 代理: $GITHUB_PROXY_PREFIX"
+    else
+        USE_GITHUB_PROXY=false
+        GITHUB_PROXY_PREFIX=""
+        print_info "已选择：GitHub 下载不使用代理"
+    fi
+}
+
+# 为 GitHub 链接按需添加代理前缀
+resolve_github_url() {
+    local raw_url="$1"
+    if [ "$USE_GITHUB_PROXY" = true ]; then
+        printf "%s%s" "$GITHUB_PROXY_PREFIX" "$raw_url"
+    else
+        printf "%s" "$raw_url"
+    fi
 }
 
 # 检查是否为 root 用户（某些操作可能需要）
@@ -219,7 +278,9 @@ install_oh_my_zsh() {
         print_info "Oh My Zsh 已安装，跳过安装步骤"
     else
         print_info "正在安装 Oh My Zsh..."
-        sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+        local OH_MY_ZSH_INSTALL_URL
+        OH_MY_ZSH_INSTALL_URL="$(resolve_github_url "https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh")"
+        sh -c "$(curl -fsSL "$OH_MY_ZSH_INSTALL_URL")" "" --unattended
         
         # 如果当前 shell 不是 zsh，提示用户切换
         if [[ "$SHELL" != *"zsh"* ]]; then
@@ -237,7 +298,7 @@ install_zsh_plugins() {
     # zsh-autosuggestions - 自动建议插件
     if [ ! -d "$ZSH_CUSTOM/plugins/zsh-autosuggestions" ]; then
         print_info "安装 zsh-autosuggestions 插件..."
-        git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM}/plugins/zsh-autosuggestions
+        git clone "$(resolve_github_url "https://github.com/zsh-users/zsh-autosuggestions")" ${ZSH_CUSTOM}/plugins/zsh-autosuggestions
     else
         print_info "zsh-autosuggestions 插件已存在，跳过安装"
     fi
@@ -245,7 +306,7 @@ install_zsh_plugins() {
     # zsh-syntax-highlighting - 语法高亮插件
     if [ ! -d "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting" ]; then
         print_info "安装 zsh-syntax-highlighting 插件..."
-        git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting
+        git clone "$(resolve_github_url "https://github.com/zsh-users/zsh-syntax-highlighting.git")" ${ZSH_CUSTOM}/plugins/zsh-syntax-highlighting
     else
         print_info "zsh-syntax-highlighting 插件已存在，跳过安装"
     fi
@@ -253,7 +314,7 @@ install_zsh_plugins() {
     # zsh-completions - 自动补全插件
     if [ ! -d "$ZSH_CUSTOM/plugins/zsh-completions" ]; then
         print_info "安装 zsh-completions 插件..."
-        git clone https://github.com/zsh-users/zsh-completions ${ZSH_CUSTOM}/plugins/zsh-completions
+        git clone "$(resolve_github_url "https://github.com/zsh-users/zsh-completions")" ${ZSH_CUSTOM}/plugins/zsh-completions
     else
         print_info "zsh-completions 插件已存在，跳过安装"
     fi
@@ -367,16 +428,18 @@ install_docker_compose() {
         # 如果没有，则安装 Docker Compose V2 插件
         if command -v docker &> /dev/null; then
             print_info "正在安装 Docker Compose V2 插件..."
-            local COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest 2>/dev/null | grep 'tag_name' | cut -d\" -f4)
+            local COMPOSE_API_URL
+            COMPOSE_API_URL="$(resolve_github_url "https://api.github.com/repos/docker/compose/releases/latest")"
+            local COMPOSE_VERSION=$(curl -s "$COMPOSE_API_URL" 2>/dev/null | grep 'tag_name' | cut -d\" -f4)
             if [ -n "$COMPOSE_VERSION" ]; then
                 sudo mkdir -p /usr/local/lib/docker/cli-plugins
-                if sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null; then
+                if sudo curl -L "$(resolve_github_url "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)")" -o /usr/local/lib/docker/cli-plugins/docker-compose 2>/dev/null; then
                     sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
                     print_info "Docker Compose V2 安装完成"
                 else
                     print_warn "Docker Compose V2 安装失败，尝试安装 V1 版本..."
                     # 回退到 V1 安装
-                    if sudo curl -L "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose 2>/dev/null; then
+                    if sudo curl -L "$(resolve_github_url "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-$(uname -s)-$(uname -m)")" -o /usr/local/bin/docker-compose 2>/dev/null; then
                         sudo chmod +x /usr/local/bin/docker-compose
                         print_info "Docker Compose V1 安装完成"
                     else
@@ -476,6 +539,8 @@ install_0xproto_font() {
     local LOCAL_FONT_ZIP="$SCRIPT_DIR/$FONT_ZIP"
     local TEMP_DIR=$(mktemp -d)
     local FONT_URL="https://github.com/Nanako718/server-bootstrap/raw/refs/heads/main/0xProto.zip"
+    local FONT_DOWNLOAD_URL
+    FONT_DOWNLOAD_URL="$(resolve_github_url "$FONT_URL")"
     
     if [ -f "$LOCAL_FONT_ZIP" ]; then
         print_info "找到本地字体文件: $LOCAL_FONT_ZIP"
@@ -483,7 +548,7 @@ install_0xproto_font() {
     else
         print_info "本地未找到字体文件，正在从 GitHub 下载..."
         if command -v curl &> /dev/null; then
-            if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+            if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
                 print_info "字体文件下载成功"
             else
                 print_error "字体文件下载失败，请检查网络连接"
@@ -492,7 +557,7 @@ install_0xproto_font() {
                 return 1
             fi
         elif command -v wget &> /dev/null; then
-            if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+            if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
                 print_info "字体文件下载成功"
             else
                 print_error "字体文件下载失败，请检查网络连接"
@@ -505,7 +570,7 @@ install_0xproto_font() {
             install_curl_wget
             # 重试下载
             if command -v curl &> /dev/null; then
-                if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+                if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
                     print_info "字体文件下载成功"
                 else
                     print_error "字体文件下载失败，请检查网络连接"
@@ -514,7 +579,7 @@ install_0xproto_font() {
                     return 1
                 fi
             elif command -v wget &> /dev/null; then
-                if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_URL"; then
+                if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
                     print_info "字体文件下载成功"
                 else
                     print_error "字体文件下载失败，请检查网络连接"
@@ -645,6 +710,8 @@ configure_starship() {
     
     # 检查本地是否有配置文件
     local CONFIG_URL="https://raw.githubusercontent.com/Nanako718/server-bootstrap/refs/heads/main/starship.toml"
+    local CONFIG_DOWNLOAD_URL
+    CONFIG_DOWNLOAD_URL="$(resolve_github_url "$CONFIG_URL")"
     
     if [ -f "$LOCAL_CONFIG" ]; then
         print_info "找到本地配置文件: $LOCAL_CONFIG"
@@ -663,14 +730,14 @@ configure_starship() {
         fi
         
         if command -v curl &> /dev/null; then
-            if curl -fsSL -o "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+            if curl -fsSL -o "$STARSHIP_CONFIG_FILE" "$CONFIG_DOWNLOAD_URL"; then
                 print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
             else
                 print_warn "配置文件下载失败，将使用 Starship 默认配置"
                 print_info "您也可以稍后手动下载: $CONFIG_URL"
             fi
         elif command -v wget &> /dev/null; then
-            if wget -q -O "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+            if wget -q -O "$STARSHIP_CONFIG_FILE" "$CONFIG_DOWNLOAD_URL"; then
                 print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
             else
                 print_warn "配置文件下载失败，将使用 Starship 默认配置"
@@ -681,14 +748,14 @@ configure_starship() {
             install_curl_wget
             # 重试下载
             if command -v curl &> /dev/null; then
-                if curl -fsSL -o "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+                if curl -fsSL -o "$STARSHIP_CONFIG_FILE" "$CONFIG_DOWNLOAD_URL"; then
                     print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
                 else
                     print_warn "配置文件下载失败，将使用 Starship 默认配置"
                     print_info "您也可以稍后手动下载: $CONFIG_URL"
                 fi
             elif command -v wget &> /dev/null; then
-                if wget -q -O "$STARSHIP_CONFIG_FILE" "$CONFIG_URL"; then
+                if wget -q -O "$STARSHIP_CONFIG_FILE" "$CONFIG_DOWNLOAD_URL"; then
                     print_info "Starship 配置文件下载成功: $STARSHIP_CONFIG_FILE"
                 else
                     print_warn "配置文件下载失败，将使用 Starship 默认配置"
@@ -746,7 +813,10 @@ verify_installation() {
     echo ""
     
     local INSTALLED_COUNT=0
-    local TOTAL_COUNT=6
+    local TOTAL_COUNT=4
+    if [ "$INSTALL_DOCKER" = true ]; then
+        TOTAL_COUNT=6
+    fi
     
     # Zsh
     if command -v zsh &> /dev/null; then
@@ -764,20 +834,25 @@ verify_installation() {
         print_error "✗ Oh My Zsh"
     fi
     
-    # Docker
-    if command -v docker &> /dev/null; then
-        print_info "✓ Docker"
-        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+    if [ "$INSTALL_DOCKER" = true ]; then
+        # Docker
+        if command -v docker &> /dev/null; then
+            print_info "✓ Docker"
+            INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+        else
+            print_error "✗ Docker"
+        fi
+        
+        # Docker Compose
+        if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then
+            print_info "✓ Docker Compose"
+            INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
+        else
+            print_error "✗ Docker Compose"
+        fi
     else
-        print_error "✗ Docker"
-    fi
-    
-    # Docker Compose
-    if command -v docker-compose &> /dev/null || docker compose version &> /dev/null 2>&1; then
-        print_info "✓ Docker Compose"
-        INSTALLED_COUNT=$((INSTALLED_COUNT + 1))
-    else
-        print_error "✗ Docker Compose"
+        print_info "- Docker（已按选择跳过）"
+        print_info "- Docker Compose（已按选择跳过）"
     fi
     
     # Starship
@@ -823,7 +898,7 @@ verify_installation() {
     print_info "2. 如果这是首次安装 Zsh，请切换默认 Shell："
     print_info "   chsh -s $(which zsh)"
     echo ""
-    if [[ "$SYSTEM_TYPE" == "linux" ]] && [ "$EUID" -ne 0 ]; then
+    if [ "$INSTALL_DOCKER" = true ] && [[ "$SYSTEM_TYPE" == "linux" ]] && [ "$EUID" -ne 0 ]; then
         print_info "3. 如果 Docker 命令需要 sudo，请重新登录："
         print_info "   重新登录后 docker 组权限将生效"
         echo ""
@@ -845,6 +920,9 @@ main() {
     
     # 检测系统类型
     detect_system
+
+    # 选择安装项
+    ask_install_options
     
     # 首先安装 curl/wget（其他安装步骤可能需要）
     print_info "检查并安装必要的工具..."
@@ -861,9 +939,13 @@ main() {
     install_0xproto_font
     install_starship
     configure_starship
-    install_docker
-    install_docker_compose
-    configure_docker_autostart
+    if [ "$INSTALL_DOCKER" = true ]; then
+        install_docker
+        install_docker_compose
+        configure_docker_autostart
+    else
+        print_info "按用户选择跳过 Docker 相关安装与配置"
+    fi
     configure_timezone
     
     # 验证安装
