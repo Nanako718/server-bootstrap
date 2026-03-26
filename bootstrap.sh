@@ -98,6 +98,24 @@ download_file_with_progress() {
     fi
 }
 
+# 多链接重试下载（用于网络不稳定或代理偶发失败）
+download_file_with_fallback() {
+    local output_file="$1"
+    shift
+    local url=""
+
+    for url in "$@"; do
+        [ -z "$url" ] && continue
+        print_info "尝试下载: $url"
+        if download_file_with_progress "$url" "$output_file"; then
+            return 0
+        fi
+        print_warn "当前链接下载失败，自动尝试下一个链接..."
+    done
+
+    return 1
+}
+
 # 检查是否为 root 用户（某些操作可能需要）
 check_root() {
     if [[ $EUID -eq 0 ]]; then
@@ -554,8 +572,11 @@ install_0xproto_font() {
     local LOCAL_FONT_ZIP="$SCRIPT_DIR/$FONT_ZIP"
     local TEMP_DIR=$(mktemp -d)
     local FONT_URL="https://github.com/Nanako718/server-bootstrap/raw/refs/heads/main/0xProto.zip"
+    local FONT_RAW_URL="https://raw.githubusercontent.com/Nanako718/server-bootstrap/main/0xProto.zip"
     local FONT_DOWNLOAD_URL
+    local FONT_DOWNLOAD_RAW_URL
     FONT_DOWNLOAD_URL="$(resolve_github_url "$FONT_URL")"
+    FONT_DOWNLOAD_RAW_URL="$(resolve_github_url "$FONT_RAW_URL")"
     
     if [ -f "$LOCAL_FONT_ZIP" ]; then
         print_info "找到本地字体文件: $LOCAL_FONT_ZIP"
@@ -568,11 +589,16 @@ install_0xproto_font() {
         fi
 
         if command -v curl &> /dev/null || command -v wget &> /dev/null; then
-            if download_file_with_progress "$FONT_DOWNLOAD_URL" "$TEMP_DIR/$FONT_ZIP"; then
+            if download_file_with_fallback "$TEMP_DIR/$FONT_ZIP" \
+                "$FONT_DOWNLOAD_URL" \
+                "$FONT_DOWNLOAD_RAW_URL" \
+                "$FONT_URL" \
+                "$FONT_RAW_URL"; then
                 print_info "字体文件下载成功"
             else
                 print_error "字体文件下载失败，请检查网络连接"
-                print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
+                print_info "您也可以手动下载并放置到脚本同目录: $FONT_DOWNLOAD_URL"
+                print_info "备用直连地址: $FONT_RAW_URL"
                 rm -rf "$TEMP_DIR"
                 return 1
             fi
