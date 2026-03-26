@@ -116,6 +116,29 @@ download_file_with_fallback() {
     return 1
 }
 
+# 单链接重试下载
+download_file_with_retry() {
+    local download_url="$1"
+    local output_file="$2"
+    local max_retries="$3"
+    local attempt=1
+
+    while [ "$attempt" -le "$max_retries" ]; do
+        print_info "尝试下载(${attempt}/${max_retries}): $download_url"
+        if download_file_with_progress "$download_url" "$output_file"; then
+            return 0
+        fi
+
+        if [ "$attempt" -lt "$max_retries" ]; then
+            print_warn "下载失败，准备重试..."
+            sleep 1
+        fi
+        attempt=$((attempt + 1))
+    done
+
+    return 1
+}
+
 # 获取 GitHub 仓库最新 release tag（例如 v1.23.0）
 get_github_latest_tag() {
     local api_url="$1"
@@ -588,6 +611,7 @@ install_0xproto_font() {
     local LOCAL_FONT_ZIP="$SCRIPT_DIR/$FONT_ZIP"
     local TEMP_DIR=$(mktemp -d)
     local FONT_URL="https://github.com/Nanako718/server-bootstrap/raw/refs/heads/main/0xProto.zip"
+    local FONT_PREFERRED_PROXY_URL="https://gh-proxy.org/https://github.com/Nanako718/server-bootstrap/raw/refs/heads/main/0xProto.zip"
     local FONT_RAW_URL="https://raw.githubusercontent.com/Nanako718/server-bootstrap/main/0xProto.zip"
     local FONT_DOWNLOAD_URL
     local FONT_DOWNLOAD_RAW_URL
@@ -605,7 +629,9 @@ install_0xproto_font() {
         fi
 
         if command -v curl &> /dev/null || command -v wget &> /dev/null; then
-            if download_file_with_fallback "$TEMP_DIR/$FONT_ZIP" \
+            if download_file_with_retry "$FONT_PREFERRED_PROXY_URL" "$TEMP_DIR/$FONT_ZIP" 3; then
+                print_info "字体文件下载成功"
+            elif download_file_with_fallback "$TEMP_DIR/$FONT_ZIP" \
                 "$FONT_DOWNLOAD_URL" \
                 "$FONT_DOWNLOAD_RAW_URL" \
                 "$FONT_URL" \
