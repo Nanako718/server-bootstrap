@@ -587,8 +587,7 @@ install_0xproto_font() {
     # 解压字体文件
     if command -v unzip &> /dev/null; then
         print_info "正在解压字体文件..."
-        cd "$TEMP_DIR"
-        unzip -q "$FONT_ZIP" -d "$TEMP_DIR" 2>/dev/null || {
+        unzip -q "$TEMP_DIR/$FONT_ZIP" -d "$TEMP_DIR" 2>/dev/null || {
             print_error "字体文件解压失败，请检查文件是否完整"
             rm -rf "$TEMP_DIR"
             return 1
@@ -644,43 +643,75 @@ install_starship() {
             install_curl_wget
         fi
         
-        if [[ "$SYSTEM_TYPE" == "macos" ]]; then
-            # macOS 使用 Homebrew 安装（如果可用）
-            if command -v brew &> /dev/null; then
-                print_info "使用 Homebrew 安装 Starship..."
-                brew install starship
-            else
-                # 使用官方安装脚本
-                print_info "使用官方安装脚本安装 Starship..."
-                if command -v curl &> /dev/null; then
-                    sh -c "$(curl -fsSL https://starship.rs/install.sh)" -- --yes
-                elif command -v wget &> /dev/null; then
-                    # 使用 wget 下载安装脚本
-                    local INSTALL_SCRIPT=$(mktemp)
-                    wget -q -O "$INSTALL_SCRIPT" https://starship.rs/install.sh
-                    sh "$INSTALL_SCRIPT" -- --yes
-                    rm -f "$INSTALL_SCRIPT"
-                else
-                    print_error "无法安装 Starship：需要 curl 或 wget"
-                    return 1
-                fi
-            fi
-        else
-            # Linux 系统使用官方安装脚本
-            print_info "使用官方安装脚本安装 Starship..."
-            if command -v curl &> /dev/null; then
-                sh -c "$(curl -fsSL https://starship.rs/install.sh)" -- --yes
-            elif command -v wget &> /dev/null; then
-                # 使用 wget 下载安装脚本
-                local INSTALL_SCRIPT=$(mktemp)
-                wget -q -O "$INSTALL_SCRIPT" https://starship.rs/install.sh
-                sh "$INSTALL_SCRIPT" -- --yes
-                rm -f "$INSTALL_SCRIPT"
-            else
-                print_error "无法安装 Starship：需要 curl 或 wget"
+        if [[ "$SYSTEM_TYPE" == "macos" ]] && command -v brew &> /dev/null; then
+            print_info "使用 Homebrew 安装 Starship..."
+            brew install starship
+            return 0
+        fi
+
+        # 统一使用 GitHub Release 二进制安装，确保可走 GitHub 代理
+        local STARSHIP_ARCH
+        local STARSHIP_TARGET
+        local STARSHIP_URL
+        local STARSHIP_DOWNLOAD_URL
+        local TEMP_DIR
+        local TAR_FILE
+        local BIN_FILE
+
+        case "$(uname -m)" in
+            x86_64|amd64) STARSHIP_ARCH="x86_64" ;;
+            aarch64|arm64) STARSHIP_ARCH="aarch64" ;;
+            *)
+                print_error "不支持的 CPU 架构: $(uname -m)"
                 return 1
+                ;;
+        esac
+
+        if [[ "$SYSTEM_TYPE" == "macos" ]]; then
+            STARSHIP_TARGET="apple-darwin"
+        else
+            if ldd --version 2>&1 | grep -qi "musl"; then
+                STARSHIP_TARGET="unknown-linux-musl"
+            else
+                STARSHIP_TARGET="unknown-linux-gnu"
             fi
         fi
+
+        STARSHIP_URL="https://github.com/starship/starship/releases/latest/download/starship-${STARSHIP_ARCH}-${STARSHIP_TARGET}.tar.gz"
+        STARSHIP_DOWNLOAD_URL="$(resolve_github_url "$STARSHIP_URL")"
+
+        TEMP_DIR="$(mktemp -d)"
+        TAR_FILE="$TEMP_DIR/starship.tar.gz"
+        BIN_FILE="$TEMP_DIR/starship"
+
+        print_info "正在下载 Starship 二进制文件..."
+        if ! download_file_with_progress "$STARSHIP_DOWNLOAD_URL" "$TAR_FILE"; then
+            print_error "Starship 下载失败，请检查网络连接或代理设置"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
+
+        print_info "正在解压 Starship..."
+        if ! tar -xzf "$TAR_FILE" -C "$TEMP_DIR"; then
+            print_error "Starship 解压失败"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
+
+        if [ ! -f "$BIN_FILE" ]; then
+            print_error "未找到 Starship 可执行文件"
+            rm -rf "$TEMP_DIR"
+            return 1
+        fi
+
+        if [ -w "/usr/local/bin" ]; then
+            install -m 755 "$BIN_FILE" /usr/local/bin/starship
+        else
+            sudo install -m 755 "$BIN_FILE" /usr/local/bin/starship
+        fi
+
+        rm -rf "$TEMP_DIR"
+        print_info "Starship 安装完成"
     fi
 }
 
