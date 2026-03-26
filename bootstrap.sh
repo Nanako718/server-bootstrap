@@ -83,6 +83,21 @@ resolve_github_url() {
     fi
 }
 
+# 带进度条下载文件
+download_file_with_progress() {
+    local download_url="$1"
+    local output_file="$2"
+
+    if command -v curl &> /dev/null; then
+        curl --fail --location --progress-bar -o "$output_file" "$download_url"
+    elif command -v wget &> /dev/null; then
+        wget --show-progress --progress=bar:force:noscroll -O "$output_file" "$download_url"
+    else
+        print_error "未找到 curl 或 wget 命令，无法下载文件"
+        return 1
+    fi
+}
+
 # 检查是否为 root 用户（某些操作可能需要）
 check_root() {
     if [[ $EUID -eq 0 ]]; then
@@ -547,17 +562,13 @@ install_0xproto_font() {
         cp "$LOCAL_FONT_ZIP" "$TEMP_DIR/$FONT_ZIP"
     else
         print_info "本地未找到字体文件，正在从 GitHub 下载..."
-        if command -v curl &> /dev/null; then
-            if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
-                print_info "字体文件下载成功"
-            else
-                print_error "字体文件下载失败，请检查网络连接"
-                print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
-                rm -rf "$TEMP_DIR"
-                return 1
-            fi
-        elif command -v wget &> /dev/null; then
-            if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
+        if ! command -v curl &> /dev/null && ! command -v wget &> /dev/null; then
+            print_warn "未找到 curl 或 wget 命令，正在尝试安装..."
+            install_curl_wget
+        fi
+
+        if command -v curl &> /dev/null || command -v wget &> /dev/null; then
+            if download_file_with_progress "$FONT_DOWNLOAD_URL" "$TEMP_DIR/$FONT_ZIP"; then
                 print_info "字体文件下载成功"
             else
                 print_error "字体文件下载失败，请检查网络连接"
@@ -566,33 +577,10 @@ install_0xproto_font() {
                 return 1
             fi
         else
-            print_warn "未找到 curl 或 wget 命令，正在尝试安装..."
-            install_curl_wget
-            # 重试下载
-            if command -v curl &> /dev/null; then
-                if curl -fsSL -o "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
-                    print_info "字体文件下载成功"
-                else
-                    print_error "字体文件下载失败，请检查网络连接"
-                    print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
-                    rm -rf "$TEMP_DIR"
-                    return 1
-                fi
-            elif command -v wget &> /dev/null; then
-                if wget -q -O "$TEMP_DIR/$FONT_ZIP" "$FONT_DOWNLOAD_URL"; then
-                    print_info "字体文件下载成功"
-                else
-                    print_error "字体文件下载失败，请检查网络连接"
-                    print_info "您也可以手动下载并放置到脚本同目录: $FONT_URL"
-                    rm -rf "$TEMP_DIR"
-                    return 1
-                fi
-            else
-                print_error "curl 和 wget 都未安装成功，无法下载字体文件"
-                print_info "请手动下载字体文件: $FONT_URL"
-                rm -rf "$TEMP_DIR"
-                return 1
-            fi
+            print_error "curl 和 wget 都未安装成功，无法下载字体文件"
+            print_info "请手动下载字体文件: $FONT_URL"
+            rm -rf "$TEMP_DIR"
+            return 1
         fi
     fi
     
