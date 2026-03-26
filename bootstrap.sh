@@ -116,6 +116,22 @@ download_file_with_fallback() {
     return 1
 }
 
+# 获取 GitHub 仓库最新 release tag（例如 v1.23.0）
+get_github_latest_tag() {
+    local api_url="$1"
+    local response=""
+
+    if command -v curl &> /dev/null; then
+        response="$(curl -fsSL "$api_url" 2>/dev/null || true)"
+    elif command -v wget &> /dev/null; then
+        response="$(wget -q -O - "$api_url" 2>/dev/null || true)"
+    else
+        return 1
+    fi
+
+    printf "%s" "$response" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
 # 检查是否为 root 用户（某些操作可能需要）
 check_root() {
     if [[ $EUID -eq 0 ]]; then
@@ -679,7 +695,13 @@ install_starship() {
         local STARSHIP_ARCH
         local STARSHIP_TARGET
         local STARSHIP_URL
-        local STARSHIP_DOWNLOAD_URL
+        local STARSHIP_DIRECT_LATEST_URL
+        local STARSHIP_PROXY_LATEST_URL
+        local STARSHIP_DIRECT_VERSION_URL=""
+        local STARSHIP_PROXY_VERSION_URL=""
+        local STARSHIP_API_URL
+        local STARSHIP_API_RESOLVED_URL
+        local STARSHIP_VERSION
         local TEMP_DIR
         local TAR_FILE
         local BIN_FILE
@@ -704,14 +726,33 @@ install_starship() {
         fi
 
         STARSHIP_URL="https://github.com/starship/starship/releases/latest/download/starship-${STARSHIP_ARCH}-${STARSHIP_TARGET}.tar.gz"
-        STARSHIP_DOWNLOAD_URL="$(resolve_github_url "$STARSHIP_URL")"
+        STARSHIP_DIRECT_LATEST_URL="$STARSHIP_URL"
+        STARSHIP_PROXY_LATEST_URL="$(resolve_github_url "$STARSHIP_URL")"
+        STARSHIP_API_URL="https://api.github.com/repos/starship/starship/releases/latest"
+        STARSHIP_API_RESOLVED_URL="$(resolve_github_url "$STARSHIP_API_URL")"
+
+        STARSHIP_VERSION="$(get_github_latest_tag "$STARSHIP_API_RESOLVED_URL")"
+        if [ -z "$STARSHIP_VERSION" ]; then
+            STARSHIP_VERSION="$(get_github_latest_tag "$STARSHIP_API_URL")"
+        fi
+        if [ -n "$STARSHIP_VERSION" ]; then
+            STARSHIP_DIRECT_VERSION_URL="https://github.com/starship/starship/releases/download/${STARSHIP_VERSION}/starship-${STARSHIP_ARCH}-${STARSHIP_TARGET}.tar.gz"
+            STARSHIP_PROXY_VERSION_URL="$(resolve_github_url "$STARSHIP_DIRECT_VERSION_URL")"
+            print_info "检测到 Starship 最新版本: $STARSHIP_VERSION"
+        else
+            print_warn "未能获取 Starship 最新版本号，将使用 latest 链接下载"
+        fi
 
         TEMP_DIR="$(mktemp -d)"
         TAR_FILE="$TEMP_DIR/starship.tar.gz"
         BIN_FILE="$TEMP_DIR/starship"
 
         print_info "正在下载 Starship 二进制文件..."
-        if ! download_file_with_progress "$STARSHIP_DOWNLOAD_URL" "$TAR_FILE"; then
+        if ! download_file_with_fallback "$TAR_FILE" \
+            "$STARSHIP_PROXY_LATEST_URL" \
+            "$STARSHIP_PROXY_VERSION_URL" \
+            "$STARSHIP_DIRECT_LATEST_URL" \
+            "$STARSHIP_DIRECT_VERSION_URL"; then
             print_error "Starship 下载失败，请检查网络连接或代理设置"
             rm -rf "$TEMP_DIR"
             return 1
